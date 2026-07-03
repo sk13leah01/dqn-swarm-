@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="DQN Swarm">
+    <title>DQN Neural Swarm</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0a0a0a; color: #fff; padding: 12px;
+        }
+        h1 { font-size: 20px; margin-bottom: 8px; text-align: center; }
+       .status { text-align: center; font-size: 12px; color: #888; margin-bottom: 12px; }
+       .connected { color: #0f0; }
+       .chart-container { background: #111; border-radius: 12px; padding: 8px; margin-bottom: 16px; }
+       .agents { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+       .agent {
+            background: #111; border-radius: 8px; padding: 10px; border-left: 4px solid #333;
+        }
+       .agent.buy { border-left-color: #0f0; }
+       .agent.sell { border-left-color: #f00; }
+       .agent.hold { border-left-color: #888; }
+       .agent-id { font-size: 10px; color: #666; }
+       .agent-action { font-size: 16px; font-weight: bold; margin: 4px 0; }
+       .agent-loss { font-size: 11px; color: #aaa; }
+       .consensus { 
+            background: #111; border-radius: 12px; padding: 12px; 
+            text-align: center; margin-bottom: 16px; font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Neural DQN Swarm</h1>
+    <div class="status" id="status">Connecting...</div>
+    
+    <div class="chart-container">
+        <canvas id="priceChart"></canvas>
+    </div>
+    
+    <div class="consensus" id="consensus">Waiting for agents...</div>
+    
+    <div class="agents" id="agents"></div>
+
+    <script>
+        const WS_URL = 'wss://REPLACE_ME_URL/ws'; // <-- REPLACE THIS
+        const statusEl = document.getElementById('status');
+        const consensusEl = document.getElementById('consensus');
+        const agentsEl = document.getElementById('agents');
+        
+        let priceData = [];
+        let chart;
+        
+        function initChart() {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'BTC Normalized',
+                        data: [],
+                        borderColor: '#0af',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { display: false },
+                        y: { display: true, grid: { color: '#222' }, ticks: { color: '#666' } }
+                    }
+                }
+            });
+            document.getElementById('priceChart').style.height = '150px';
+        }
+        
+        function connectWS() {
+            const ws = new WebSocket(WS_URL);
+            
+            ws.onopen = () => {
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'status connected';
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                // Update price chart
+                priceData.push(data.price);
+                if (priceData.length > 60) priceData.shift();
+                chart.data.labels = priceData.map((_, i) => i);
+                chart.data.datasets[0].data = priceData;
+                chart.update('none');
+                
+                // Update consensus
+                const buys = data.agents.filter(a => a.action === 2).length;
+                const sells = data.agents.filter(a => a.action === 0).length;
+                consensusEl.textContent = `Step ${data.step} | ${buys} Buy | ${sells} Sell | ${10-buys-sells} Hold`;
+                
+                // Update agents
+                agentsEl.innerHTML = '';
+                data.agents.forEach(agent => {
+                    const actionText = ['Sell', 'Hold', 'Buy'][agent.action];
+                    const actionClass = ['sell', 'hold', 'buy'][agent.action];
+                    agentsEl.innerHTML += `
+                        <div class="agent ${actionClass}">
+                            <div class="agent-id">Agent ${agent.id}</div>
+                            <div class="agent-action">${actionText}</div>
+                            <div class="agent-loss">Loss: ${agent.loss.toFixed(4)}</div>
+                        </div
